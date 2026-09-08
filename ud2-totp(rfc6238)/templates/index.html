@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Laboratorio TOTP (RFC 6238)</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #181a1b; color: #e8e6e3; margin: 0; padding: 20px; }
+        .container { max-width: 900px; margin: 0 auto; background: #222527; padding: 25px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        h1, h2, h3 { color: #4da6ff; text-align: center; }
+        .flex { display: flex; flex-wrap: wrap; gap: 20px; justify-content: center; align-items: center; margin-top: 20px; }
+        .card { background: #2c3032; padding: 20px; border-radius: 8px; flex: 1; min-width: 280px; }
+        .qr-img { border: 5px solid white; border-radius: 5px; display: block; margin: 0 auto; }
+        .secret-box { font-family: monospace; font-size: 18px; background: #111; color: #00ffcc; padding: 10px; border-radius: 5px; text-align: center; word-break: break-all; }
+        .timer-bar { width: 100%; background: #444; height: 12px; border-radius: 6px; overflow: hidden; margin-top: 10px; }
+        .timer-progress { height: 100%; background: #00cc66; width: 100%; transition: width 1s linear; }
+        .code-box { font-family: monospace; font-size: 24px; color: #ffcc00; text-align: center; font-weight: bold; }
+        input[type="text"], select { width: 100%; padding: 10px; font-size: 18px; border-radius: 5px; border: 1px solid #555; background: #111; color: #fff; box-sizing: border-box; margin-bottom: 10px; }
+        button { width: 100%; padding: 12px; font-size: 18px; font-weight: bold; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        .result-box { margin-top: 15px; font-size: 18px; font-weight: bold; text-align: center; padding: 10px; border-radius: 5px; }
+        .success { background: #1e4620; color: #25d366; }
+        .error { background: #4a1919; color: #ff5555; }
+        .math-table { width: 100%; font-family: monospace; font-size: 14px; border-collapse: collapse; margin-top: 10px; }
+        .math-table td { padding: 6px; border-bottom: 1px solid #444; }
+        .math-table td:first-child { color: #888; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Práctica de Autenticación TOTP (RFC 6238)</h1>
+    
+    <div class="flex">
+        <!-- Tarjeta QR y Secreto -->
+        <div class="card">
+            <h3>1. Enrolamiento MFA</h3>
+            <img src="data:image/png;base64,{{ qr_b64 }}" class="qr-img" alt="QR TOTP">
+            <p style="text-align: center; margin-top: 10px;">Escanea con Aegis / Google Auth</p>
+            <div class="secret-box">{{ secret }}</div>
+        </div>
+
+        <!-- Tarjeta Verificación -->
+        <div class="card">
+            <h3>2. Validación de Token</h3>
+            <label for="tokenInput">Código de 6 dígitos del móvil:</label>
+            <input type="text" id="tokenInput" placeholder="Ej: 123456" maxlength="6">
+            
+            <label for="windowSelect">Tolerancia de Ventana (Drift):</label>
+            <select id="windowSelect">
+                <option value="0">Tolerancia 0 (Solo ventana actual - 30s)</option>
+                <option value="1" selected>Tolerancia 1 (± 30s previo/posterior)</option>
+                <option value="2">Tolerancia 2 (± 60s previo/posterior)</option>
+            </select>
+
+            <button onclick="verificarToken()">Verificar OTP</button>
+            <div id="resultado" class="result-box" style="display:none;"></div>
+        </div>
+    </div>
+
+    <!-- Desglose Matemático Interno -->
+    <div class="card" style="margin-top: 20px;">
+        <h3>3. Cálculo Interno RFC 6238 (En tiempo real)</h3>
+        
+        <div class="flex" style="justify-content: space-between; align-items: center;">
+            <div>Tiempo restante ventana: <span id="timeRemainingSec" style="font-weight: bold; color: #00ffcc;">--</span>s</div>
+            <div class="code-box">OTP Calculado: <span id="currentOtp">------</span></div>
+        </div>
+        
+        <div class="timer-bar">
+            <div id="timerBar" class="timer-progress"></div>
+        </div>
+
+        <table class="math-table">
+            <tr><td>Marca de Tiempo Unix ($T$):</td><td id="unixTime">--</td></tr>
+            <tr><td>Contador de Ventana ($C = \lfloor T / 30 \rfloor$):</td><td id="counter">--</td></tr>
+            <tr><td>HMAC-SHA1 ($K, C$) [Hex]:</td><td id="hmacHex" style="word-break: break-all;">--</td></tr>
+            <tr><td>Offset Dinámico (Último nibble):</td><td id="offset">--</td></tr>
+            <tr><td>Binario Truncado (31 bits):</td><td id="binaryCode">--</td></tr>
+            <tr><td>Verificación PyOTP (`.now()`):</td><td id="pyotpCheck" style="color: #00ffcc;">--</td></tr>
+        </table>
+    </div>
+</div>
+
+<script>
+    async function actualizarEstado() {
+        try {
+            const res = await fetch('/api/estado');
+            const data = await res.json();
+
+            document.getElementById('unixTime').innerText = data.unix_time;
+            document.getElementById('counter').innerText = data.counter;
+            document.getElementById('timeRemainingSec').innerText = data.time_remaining;
+            document.getElementById('hmacHex').innerText = data.hmac_hex;
+            document.getElementById('offset').innerText = data.offset;
+            document.getElementById('binaryCode').innerText = data.binary_code;
+            document.getElementById('currentOtp').innerText = data.otp;
+            document.getElementById('pyotpCheck').innerText = data.pyotp_check;
+
+            // Actualizar barra de progreso
+            const porcentaje = (data.time_remaining / 30) * 100;
+            const timerBar = document.getElementById('timerBar');
+            timerBar.style.width = porcentaje + '%';
+            
+            if (porcentaje < 20) {
+                timerBar.style.background = '#ff4444';
+            } else {
+                timerBar.style.background = '#00cc66';
+            }
+        } catch(e) { console.error(e); }
+    }
+
+    async function verificarToken() {
+        const token = document.getElementById('tokenInput').value.trim();
+        const windowVal = document.getElementById('windowSelect').value;
+        const resBox = document.getElementById('resultado');
+
+        if (!token) {
+            resBox.className = "result-box error";
+            resBox.innerText = "Por favor, introduce un código OTP.";
+            resBox.style.display = "block";
+            return;
+        }
+
+        const res = await fetch('/api/verificar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: token, window: windowVal })
+        });
+
+        const data = await res.json();
+        resBox.style.display = "block";
+
+        if (data.valido) {
+            resBox.className = "result-box success";
+            resBox.innerText = "✓ ¡AUTENTICACIÓN CORRECTA! Token válido.";
+        } else {
+            resBox.className = "result-box error";
+            resBox.innerText = `✗ TOKEN INVÁLIDO o CADUCADO. (Esperado: ${data.token_actual})`;
+        }
+    }
+
+    setInterval(actualizarEstado, 1000);
+    actualizarEstado();
+</script>
+</body>
+</html>

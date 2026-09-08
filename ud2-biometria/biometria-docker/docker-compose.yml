@@ -1,0 +1,10 @@
+services:
+  biometria-web:
+    build: .
+    container_name: biometria_container
+    ports:
+      - "5000:5000"
+    volumes:
+      # Mantiene el registro biométrico guardado aunque el contenedor se reinicie
+      - ./data:/app/data
+    restart: unless-stopped

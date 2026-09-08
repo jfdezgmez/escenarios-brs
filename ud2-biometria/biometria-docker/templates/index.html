@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Biometría Dockerizada</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; background: #121212; color: white; padding: 20px; }
+        #video-container { position: relative; display: inline-block; }
+        video { border: 3px solid #333; border-radius: 8px; width: 480px; height: 360px; }
+        .controls { margin: 15px; }
+        button { padding: 10px 20px; font-size: 16px; margin: 5px; cursor: pointer; border-radius: 5px; border: none; }
+        .btn-blue { background: #007bff; color: white; }
+        .btn-green { background: #28a745; color: white; }
+        #status-box { font-size: 18px; margin-top: 15px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <h2>Autenticación Biométrica + Liveness (Docker)</h2>
+    <div id="video-container">
+        <video id="webcam" autoplay playsinline></video>
+    </div>
+
+    <div class="controls">
+        <button class="btn-blue" onclick="registrarRostro()">1. Registrar Rostro</button>
+        <button class="btn-green" onclick="toggleVerificacion()">2. Iniciar / Detener Verificación</button>
+    </div>
+
+    <div id="status-box">Cargando cámara...</div>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const statusBox = document.getElementById('status-box');
+        let verificando = false;
+        let parpadeos = 0;
+        let ojoEstabaCerrado = false;
+
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then(stream => { video.srcObject = stream; statusBox.innerText = "Cámara lista."; })
+            .catch(err => { statusBox.innerText = "Error accediendo a la cámara: " + err; });
+
+        function capturarFrame() {
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0);
+            return canvas.toDataURL('image/jpeg');
+        }
+
+        async function registrarRostro() {
+            statusBox.innerText = "Procesando registro...";
+            const img = capturarFrame();
+            const res = await fetch('/api/registrar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image: img })
+            });
+            const data = await res.json();
+            statusBox.innerText = data.message;
+        }
+
+        function toggleVerificacion() {
+            verificando = !verificando;
+            parpadeos = 0;
+            if (verificando) bucleVerificacion();
+            else statusBox.innerText = "Verificación detenida.";
+        }
+
+        async function bucleVerificacion() {
+            if (!verificando) return;
+
+            const img = capturarFrame();
+            try {
+                const res = await fetch('/api/verificar', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image: img })
+                });
+                const data = await res.json();
+
+                if (data.status === 'ok') {
+                    if (data.reconocido) {
+                        if (data.ojo_cerrado) {
+                            ojoEstabaCerrado = true;
+                        } else if (ojoEstabaCerrado) {
+                            parpadeos++;
+                            ojoEstabaCerrado = false;
+                        }
+
+                        if (parpadeos >= 2) {
+                            statusBox.innerHTML = `<span style="color: #28a745;">¡ACCESO CONCEDIDO! (Dist: ${data.distancia} | Parpadeos: ${parpadeos}/2)</span>`;
+                            verificando = false;
+                            return;
+                        } else {
+                            statusBox.innerHTML = `<span style="color: #ffc107;">Rostro OK (Dist: ${data.distancia}) | Parpadea (${parpadeos}/2)</span>`;
+                        }
+                    } else {
+                        statusBox.innerHTML = `<span style="color: #dc3545;">Rostro no reconocido (Dist: ${data.distancia})</span>`;
+                    }
+                } else {
+                    statusBox.innerText = data.message;
+                }
+            } catch (e) { console.error(e); }
+
+            if (verificando) setTimeout(bucleVerificacion, 200); // 5 FPS para no saturar CPU
+        }
+    </script>
+</body>
+</html>

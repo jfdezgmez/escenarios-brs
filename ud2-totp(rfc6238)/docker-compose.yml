@@ -4,4 +4,14 @@ services:
     container_name: totp_lab_container
     ports:
       - "5000:5000"
+    environment:
+      # Clave para firmar la cookie de sesión. Si se deja vacía, la app genera
+      # una aleatoria al arrancar (basta para el laboratorio; para que la
+      # sesión sobreviva a un `docker compose restart`, fija una propia con:
+      # python -c "import secrets; print(secrets.token_hex(32))"
+      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY:-}
+      # Parámetros del laboratorio (ajustables para experimentar en clase)
+      - TOTP_MAX_VENTANA=2
+      - TOTP_MAX_INTENTOS=5
+      - TOTP_BLOQUEO_SEGUNDOS=30
     restart: unless-stopped

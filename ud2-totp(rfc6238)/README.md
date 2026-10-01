@@ -10,14 +10,16 @@ Este repositorio contiene la implementación práctica y didáctica del algoritm
   - [1.1. Introducción a TOTP y MFA](#11-introducción-a-totp-y-múltiple-factor-de-autenticación-mfa)
   - [1.2. Relación entre HOTP y TOTP](#12-relación-entre-hotp-rfc-4226-y-totp-rfc-6238)
   - [1.3. Fases y Matemática del Algoritmo Paso a Paso](#13-fases-y-matemática-del-algoritmo-paso-a-paso)
-  - [1.4. Ventana de Tolerancia (Clock Drift / Offset)](#14-ventana-de-tolerancia-clock-drift--offset)
+  - [1.4. Ventana de Tolerancia (Clock Drift / Offset)](#14-ventana-de-tolerancia-clock-drift-offset)
 - [2. Estructura y Explicación del Código](#2-estructura-y-explicación-del-código)
   - [2.1. Estructura del Proyecto](#21-estructura-del-proyecto)
   - [2.2. Explicación Fichero por Fichero](#22-explicación-fichero-por-fichero)
 - [3. Guía de Uso e Interfaz Web](#3-guía-de-uso-e-interfaz-web)
   - [3.1. Requisitos Previos y Despliegue](#31-requisitos-previos-y-despliegue)
-  - [3.2. Uso de la Interfaz Web](#32-uso-de-la-interfaz-web-modo-servidor)
+  - [3.2. Variables de Entorno](#32-variables-de-entorno)
+  - [3.3. Uso de la Interfaz Web](#33-uso-de-la-interfaz-web-modo-servidor)
 - [4. Ejercicios Prácticos y Experimentos](#4-ejercicios-prácticos-y-experimentos-sugeridos)
+- [5. Limitaciones conocidas](#5-limitaciones-conocidas)
 
 ---
 
@@ -31,7 +33,7 @@ La principal ventaja del algoritmo TOTP es su capacidad para operar en entornos 
 ---
 
 ### 1.2. Relación entre HOTP (RFC 4226) y TOTP (RFC 6238)
-TOTP es una extensión directa de **HOTP** (*HMAC-Based One-Time Password*, RFC 4226). 
+TOTP es una extensión directa de **HOTP** (*HMAC-Based One-Time Password*, RFC 4226).
 
 * **HOTP:** Utiliza un contador secuencial $C$ que se incrementa en $+1$ cada vez que se genera o solicita un nuevo token:
   $$\text{HOTP}(K, C) = \text{Truncate}(\text{HMAC-SHA1}(K, C))$$
@@ -83,6 +85,8 @@ Para extraer un número entero representable a partir de los 20 bytes del result
 - **Máscara de 31 bits:** Se elimina el bit más significativo para evitar ambigüedades con números con signo:
   $$\text{Binary} = ((\text{HMAC}[\text{offset}] \ \& \ \text{0x7F}) \ll 24) \mid ((\text{HMAC}[\text{offset}+1] \ \& \ \text{0xFF}) \ll 16) \mid ((\text{HMAC}[\text{offset}+2] \ \& \ \text{0xFF}) \ll 8) \mid (\text{HMAC}[\text{offset}+3] \ \& \ \text{0xFF})$$
 
+> La implementación de este truncado dinámico (`desglosar_rfc6238()` en `app.py`) se ha verificado frente a los vectores de prueba oficiales del RFC 4226 (Apéndice D) y los reproduce exactamente.
+
 #### Paso 5: Reducción a 6 Dígitos
 Se aplica la operación módulo $10^6$ al resultado binario de 31 bits:
 
@@ -100,6 +104,8 @@ $$\text{Validar}(T) \iff \text{Token} \in \{ \text{TOTP}(C - W), \dots, \text{TO
 
 Con $W=1$, el servidor acepta el código de la ventana actual (30s), de la ventana inmediatamente anterior (-30s) y de la ventana posterior (+30s).
 
+⚠️ **Importante:** cuanto mayor es $W$, más códigos distintos se aceptan como válidos en un instante dado, lo que facilita (ligeramente) un ataque de fuerza bruta sobre el código de 6 dígitos. Por eso esta implementación **nunca confía en la ventana que indique el cliente sin acotarla** (ver sección 2.2).
+
 ---
 
 ## 2. Estructura y Explicación del Código
@@ -107,12 +113,13 @@ Con $W=1$, el servidor acepta el código de la ventana actual (30s), de la venta
 ### 2.1. Estructura del Proyecto
 
 ```text
-totp-docker/
-├── Dockerfile              --> Imagen base Python 3.10-slim
-├── docker-compose.yml      --> Despliegue de servicio en puerto 5000
+ud2-totp(rfc6238)/
+├── Dockerfile              --> Imagen Python 3.10-slim, usuario sin privilegios y healthcheck
+├── docker-compose.yml      --> Despliegue del servicio en el puerto 5000
 ├── requirements.txt        --> Dependencias del sistema (Flask, pyotp, qrcode, Pillow)
 ├── cli.py                  --> Script de consola interactiva con QR ASCII
 ├── app.py                  --> Backend Web Flask y descompositor RFC 6238
+├── .gitignore / .dockerignore
 └── templates/
     └── index.html          --> Dashboard web interactivo y simulador en tiempo real
 ```
@@ -127,37 +134,36 @@ Define las librerías necesarias:
 - **`pyotp`:** Librería estándar de Python para generación y validación de tokens OTP.
 - **`qrcode[pil]` y `Pillow`:** Generación de códigos QR tanto en formato gráfico PNG como en la consola de comandos.
 
+No se han añadido dependencias nuevas: las funcionalidades descritas abajo (sesión por alumno, bloqueo anti-fuerza-bruta) se implementan con la librería estándar de Python y las sesiones de Flask (cookies firmadas), sin necesidad de una base de datos ni de paquetes adicionales.
+
 #### B. `Dockerfile` y `docker-compose.yml`
-- **`Dockerfile`:** Utiliza la imagen oficial de Python 3.10 en versión reducida (`python:3.10-slim`), instala las dependencias de `requirements.txt` sin guardar caché y expone el puerto 5000.
-- **`docker-compose.yml`:** Define el servicio `totp-lab`, asigna el nombre al contenedor `totp_lab_container` y mapea el puerto `5000:5000`.
+- **`Dockerfile`:** Imagen `python:3.10-slim`, instala las dependencias de `requirements.txt` sin caché, **ejecuta la aplicación con un usuario sin privilegios** (`appuser`, no root) y expone un `HEALTHCHECK` contra `/health` para que Docker pueda detectar si el servicio deja de responder.
+- **`docker-compose.yml`:** Define el servicio `totp-lab`, el contenedor `totp_lab_container`, el mapeo de puertos `5000:5000` y las variables de entorno descritas en la [sección 3.2](#32-variables-de-entorno).
 
 #### C. Script de Consola (`cli.py`)
 Diseñado para la ejecución en línea de comandos según los requisitos de la práctica:
 - `pyotp.random_base32()`: Genera la semilla en Base32 aleatoria al arrancar.
 - `pyotp.totp.TOTP(secret).provisioning_uri(...)`: Genera la URI bajo la especificación normalizada `otpauth://`.
 - `qr.print_ascii(invert=True)`: Renderiza el código QR mediante caracteres unicode/ASCII en la terminal sin necesidad de interfaz gráfica.
-- **Bucle de validación:** Lee tokens ingresados por el alumno y ejecuta `totp.verify(token, valid_window=1)`. Si el código es válido, responde con un mensaje de éxito; si no lo es, muestra el token esperado en ese instante para auditoría.
+- **Bucle de validación:** Lee tokens ingresados por el alumno y ejecuta `totp.verify(token, valid_window=1)`. Si el código es válido, responde con un mensaje de éxito; si no lo es, muestra el token esperado en ese instante para auditoría. Sale limpiamente con `Ctrl+C` o fin de entrada, en lugar de mostrar una traza de error.
 
 #### D. Backend Servidor Web (`app.py`)
 Proporciona endpoints REST y expone la matemática interna del RFC:
 
-- **`desglosar_rfc6238(secret_b32)`:**
-  Implementa manualmente la especificación del algoritmo RFC 6238 paso a paso sin depender de abstracciones externas:
-  1. Decodifica la clave con `base64.b32decode`.
-  2. Empaqueta el contador temporal $C$ mediante `struct.pack(">Q", counter)` (entero de 64 bits Big-Endian).
-  3. Calcula el hash HMAC-SHA1 con `hmac.new(key, msg, hashlib.sha1)`.
-  4. Realiza el *Dynamic Truncation* extrayendo el nibble del offset y aplicando la máscara de 31 bits con `struct.unpack`.
-
+- **`desglosar_rfc6238(secret_b32)`:** implementa manualmente la especificación del algoritmo RFC 6238 paso a paso sin depender de abstracciones externas (decodificación Base32, `struct.pack`, HMAC-SHA1 y truncado dinámico).
+- **`obtener_secreto()`:** cada sesión de navegador (cookie firmada con `app.secret_key`) recibe su **propia semilla TOTP independiente**, generada la primera vez que visita `/`.
 - **Endpoints:**
-  - `GET /`: Renderiza `index.html` pasando la clave secreta y la imagen del código QR codificada en Base64.
-  - `GET /api/estado`: Retorna un objeto JSON actualizado con el estado actual del reloj Unix, contador $C$, hash HMAC en hexadecimal, offset, entero truncado binario y el código de 6 dígitos resultante.
-  - `POST /api/verificar`: Recibe el token del usuario y la ventana de tolerancia seleccionada, ejecutando la validación.
+  - `GET /`: Renderiza `index.html` pasando la clave secreta de la sesión y su código QR en Base64.
+  - `GET /api/estado`: Retorna un objeto JSON con el estado actual del reloj Unix, contador $C$, hash HMAC en hexadecimal, offset, entero truncado binario y el código de 6 dígitos resultante — siempre referido a la semilla de la sesión que hace la petición.
+  - `POST /api/verificar`: recibe el token y la ventana de tolerancia, la acota a `TOTP_MAX_VENTANA` y aplica el bloqueo anti-fuerza-bruta antes de validar.
+  - `POST /api/reiniciar`: genera una nueva semilla para la sesión actual (nuevo QR, nuevo secreto), sin tener que reiniciar el contenedor.
+  - `GET /health`: usado por el `HEALTHCHECK` de Docker.
 
 #### E. Frontend Web (`templates/index.html`)
 Ofrece una interfaz visual didáctica con las siguientes secciones:
-- **Tarjeta 1 (Enrolamiento):** Muestra el código QR PNG y la semilla de texto en Base32 para permitir enrolamiento manual o mediante cámara.
-- **Tarjeta 2 (Validación):** Formulario para ingresar el token de 6 dígitos y seleccionar la tolerancia de ventana ($W = 0, 1, 2$).
-- **Tarjeta 3 (Desglose Matemático):** Actualiza cada 1 segundo mediante un intervalo de JavaScript los valores internos del servidor (`unix_time`, `counter`, `hmac_hex`, `offset`, `binary_code`, `otp`), e incluye una barra de progreso visual de 30 a 0 segundos que marca el ciclo de vida de la ventana actual.
+- **Tarjeta 1 (Enrolamiento):** código QR PNG, semilla en texto y un botón **"Reiniciar práctica"** para generar una nueva semilla sin tocar el contenedor.
+- **Tarjeta 2 (Validación):** formulario para ingresar el token de 6 dígitos, seleccionar la tolerancia de ventana ($W = 0, 1, 2$) y ver cuántos intentos quedan antes del bloqueo temporal.
+- **Tarjeta 3 (Desglose Matemático):** se actualiza cada segundo mostrando los valores internos del servidor (`unix_time`, `counter`, `hmac_hex`, `offset`, `binary_code`, `otp`) con una barra de progreso de 30 a 0 segundos.
 
 ---
 
@@ -168,15 +174,27 @@ Ofrece una interfaz visual didáctica con las siguientes secciones:
 Para desplegar el laboratorio con **Docker Compose**, ejecuta:
 
 ```bash
-docker-compose up --build
+docker compose up --build
 ```
 
-### 3.2. Uso de la Interfaz Web (Modo Servidor)
+### 3.2. Variables de Entorno
+
+Todas son opcionales; `docker-compose.yml` ya trae valores por defecto razonables para el aula:
+
+| Variable | Por defecto | Descripción |
+|---|---|---|
+| `FLASK_SECRET_KEY` | aleatoria al arrancar | Clave para firmar la cookie de sesión. Fíjala si quieres que las sesiones sobrevivan a un `docker compose restart`. |
+| `TOTP_MAX_VENTANA` | `2` | Ventana de tolerancia máxima que el servidor acepta, aunque el cliente pida más. |
+| `TOTP_MAX_INTENTOS` | `5` | Intentos fallidos consecutivos antes de bloquear temporalmente la verificación. |
+| `TOTP_BLOQUEO_SEGUNDOS` | `30` | Duración del bloqueo tras agotar los intentos. |
+
+### 3.3. Uso de la Interfaz Web (Modo Servidor)
 
 1. **Acceso:** Abre tu navegador e ingresa a [`http://localhost:5000`](http://localhost:5000).
 2. **Enrolamiento:**
    - Abre tu aplicación móvil MFA (por ejemplo, **Aegis** o **Google Authenticator**).
    - Pulsa en *Agregar cuenta* y escanea el código QR que aparece en pantalla.
+   - Esa semilla es exclusiva de tu sesión de navegador: si un compañero abre la misma URL desde otro dispositivo, generará su propia semilla y no verá la tuya.
 3. **Monitoreo en tiempo real:**
    - Observa la sección **"3. Cálculo Interno del Algoritmo"**.
    - Verás cómo el tiempo Unix avanza segundo a segundo y cómo el contador $C$ permanece constante durante 30 segundos.
@@ -184,6 +202,7 @@ docker-compose up --build
 4. **Verificación de Token:**
    - Introduce el código de 6 dígitos generado en tu móvil en la tarjeta de validación.
    - Selecciona el grado de tolerancia de ventana ($0$, $1$ o $2$) y haz clic en **"Verificar OTP"**.
+5. **Reiniciar la práctica:** si quieres volver a enrolar desde cero (por ejemplo, para repetir la demo con otro alumno en el mismo puesto), pulsa **"Reiniciar práctica"**: se genera una semilla nueva y se limpia cualquier bloqueo activo, sin reiniciar el contenedor.
 
 ---
 
@@ -192,9 +211,27 @@ docker-compose up --build
 - **Prueba de Verificación Off-Line (Modo Avión):**
   - Activa el **Modo Avión** en tu teléfono móvil (desactivando Wi-Fi, Datos y Bluetooth).
   - Genera el token de 6 dígitos en tu app móvil e introdúcelo en la web o consola.
-  > **Reflexión:** ¿Por qué la app móvil genera tokens válidos sin tener conexión a Internet?  
+  > **Reflexión:** ¿Por qué la app móvil genera tokens válidos sin tener conexión a Internet?
   > *(Porque solo requiere la semilla $K$ compartida en el enrolamiento y la hora actual de su reloj interno).*
 
 - **Demostración de Tolerancia de Ventana (Drift):**
   - Espera a que la barra de tiempo esté a punto de finalizar (1 o 2 segundos restantes) e introduce el token justo cuando la barra cambie de ciclo.
   - Cambia la tolerancia en el desplegable de $0$ a $1$ para observar cómo la ventana anterior sigue siendo aceptada por el servidor para evitar falsos negativos por micro-desincronizaciones.
+
+- **Fuerza bruta acotada (bloqueo anti-abuso):**
+  - Introduce 5 códigos incorrectos seguidos y observa cómo la tarjeta de validación pasa a modo "bloqueado" durante `TOTP_BLOQUEO_SEGUNDOS`.
+  > **Reflexión:** un código de 6 dígitos solo tiene 1.000.000 de combinaciones. Sin un mecanismo de bloqueo, ¿cuánto tardaría un script en probarlas todas contra un servidor sin esta protección?
+
+- **Aislamiento entre alumnos:**
+  - Abre la misma URL en dos navegadores (o uno en modo incógnito) y comprueba en la tarjeta 1 que cada uno obtiene un secreto y un QR distintos.
+  > Antes de esta corrección, **todas las visitas compartían una única semilla global**: cualquier alumno podía generar códigos válidos para la "identidad" de cualquier otro conectado al mismo servidor. Esta es la razón por la que ahora la semilla vive en la sesión de cada navegador.
+
+---
+
+## 5. Limitaciones conocidas
+
+Este laboratorio es intencionadamente transparente: la tarjeta 3 expone en tiempo real el código válido, el HMAC y el resto de valores internos, para que el alumno pueda seguir el algoritmo paso a paso. Por ese motivo:
+
+- El bloqueo anti-fuerza-bruta de la sección 4 es un **recurso pedagógico** para introducir el concepto de *rate limiting*, no una medida de seguridad real de esta demo (quien tiene el panel delante ya ve el código válido sin necesidad de forzarlo).
+- La sesión se guarda en una cookie firmada por el propio servidor Flask, sin base de datos: si borras las cookies del navegador o cambias de dispositivo, se te asignará una semilla nueva.
+- Pensado para uso en un aula/laboratorio controlado, no para producción.

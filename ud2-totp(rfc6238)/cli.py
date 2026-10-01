@@ -2,6 +2,7 @@ import pyotp
 import qrcode
 import time
 
+
 def ejecutar_cli():
     print("=" * 60)
     print("  LABORATORIO TOTP (RFC 6238) - MODO CONSOLA")
@@ -9,30 +10,34 @@ def ejecutar_cli():
 
     # 1. Generar semilla secreta en Base32
     secret = pyotp.random_base32()
-    print(f"\\n[1] Clave Secreta en Base32 generada: {secret}")
+    print(f"\n[1] Clave Secreta en Base32 generada: {secret}")
 
     # 2. Crear URI estándar de OTP
     uri = pyotp.totp.TOTP(secret).provisioning_uri(
-        name="usuario@ejemplo.com", 
+        name="usuario@ejemplo.com",
         issuer_name="CursoCiberseguridad"
     )
 
     # 3. Mostrar código QR en consola ASCII
-    print("\\n[2] Escanea este código QR con tu app MFA (Aegis, Google Auth, FreeOTP):\\n")
+    print("\n[2] Escanea este código QR con tu app MFA (Aegis, Google Auth, FreeOTP):\n")
     qr = qrcode.QRCode()
     qr.add_data(uri)
     qr.print_ascii(invert=True)
 
-    print(f"\\nURI de Aprovisionamiento: {uri}\\n")
+    print(f"\nURI de Aprovisionamiento: {uri}\n")
     print("-" * 60)
 
     totp = pyotp.TOTP(secret)
 
     # 4. Bucle de verificación de Tokens
     while True:
-        tiempo_restante = 30 - (int(time.time()) % 30)
-        print(f"\\n[Tiempo rest. ventana actual: {tiempo_restante}s]")
-        token_input = input("Introduce el token de 6 dígitos (o 'q' para salir): ").strip()
+        try:
+            tiempo_restante = 30 - (int(time.time()) % 30)
+            print(f"\n[Tiempo rest. ventana actual: {tiempo_restante}s]")
+            token_input = input("Introduce el token de 6 dígitos (o 'q' para salir): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nSaliendo del laboratorio.")
+            break
 
         if token_input.lower() == 'q':
             print("Saliendo del laboratorio.")
@@ -46,6 +51,7 @@ def ejecutar_cli():
         else:
             token_esperado = totp.now()
             print(f" [ERROR] Token INVÁLIDO. (El token actual es: {token_esperado})")
+
 
 if __name__ == "__main__":
     ejecutar_cli()

@@ -1,0 +1,9 @@
+# Plantillas biométricas registradas por los alumnos: son datos personales
+# y nunca deben llegar al repositorio.
+data/usuarios/*.npy
+!data/usuarios/.gitkeep
+
+__pycache__/
+*.pyc
+.venv/
+venv/

@@ -5,6 +5,11 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      # Mantiene el registro biométrico guardado aunque el contenedor se reinicie
+      # Mantiene las plantillas biométricas registradas aunque el contenedor se reinicie
       - ./data:/app/data
+    environment:
+      # Umbrales del laboratorio, ajustables para experimentar en clase
+      - EAR_UMBRAL=0.21
+      - UMBRAL_DISTANCIA=0.50
+      - PARPADEOS_REQUERIDOS=2
     restart: unless-stopped

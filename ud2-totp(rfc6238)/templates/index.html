@@ -17,34 +17,41 @@
         input[type="text"], select { width: 100%; padding: 10px; font-size: 18px; border-radius: 5px; border: 1px solid #555; background: #111; color: #fff; box-sizing: border-box; margin-bottom: 10px; }
         button { width: 100%; padding: 12px; font-size: 18px; font-weight: bold; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
         button:hover { background: #0056b3; }
+        button.secondary { background: #444; margin-top: 8px; }
+        button.secondary:hover { background: #555; }
         .result-box { margin-top: 15px; font-size: 18px; font-weight: bold; text-align: center; padding: 10px; border-radius: 5px; }
         .success { background: #1e4620; color: #25d366; }
         .error { background: #4a1919; color: #ff5555; }
+        .warning { background: #4a3c19; color: #ffcc00; }
         .math-table { width: 100%; font-family: monospace; font-size: 14px; border-collapse: collapse; margin-top: 10px; }
         .math-table td { padding: 6px; border-bottom: 1px solid #444; }
         .math-table td:first-child { color: #888; }
+        .hint { font-size: 13px; color: #999; text-align: center; margin-top: 10px; }
+        .intentos { font-size: 13px; color: #999; text-align: center; margin-top: 6px; }
     </style>
 </head>
 <body>
 
 <div class="container">
     <h1>Práctica de Autenticación TOTP (RFC 6238)</h1>
-    
+
     <div class="flex">
         <!-- Tarjeta QR y Secreto -->
         <div class="card">
             <h3>1. Enrolamiento MFA</h3>
-            <img src="data:image/png;base64,{{ qr_b64 }}" class="qr-img" alt="QR TOTP">
+            <img id="qrImg" src="data:image/png;base64,{{ qr_b64 }}" class="qr-img" alt="QR TOTP">
             <p style="text-align: center; margin-top: 10px;">Escanea con Aegis / Google Auth</p>
-            <div class="secret-box">{{ secret }}</div>
+            <div class="secret-box" id="secretBox">{{ secret }}</div>
+            <button class="secondary" onclick="reiniciarPractica()">Reiniciar práctica (nueva semilla)</button>
+            <p class="hint">Esta semilla es exclusiva de tu sesión de navegador: si otro compañero abre esta misma URL, recibirá una semilla distinta.</p>
         </div>
 
         <!-- Tarjeta Verificación -->
         <div class="card">
             <h3>2. Validación de Token</h3>
             <label for="tokenInput">Código de 6 dígitos del móvil:</label>
-            <input type="text" id="tokenInput" placeholder="Ej: 123456" maxlength="6">
-            
+            <input type="text" id="tokenInput" placeholder="Ej: 123456" maxlength="6" inputmode="numeric" pattern="[0-9]*">
+
             <label for="windowSelect">Tolerancia de Ventana (Drift):</label>
             <select id="windowSelect">
                 <option value="0">Tolerancia 0 (Solo ventana actual - 30s)</option>
@@ -54,18 +61,19 @@
 
             <button onclick="verificarToken()">Verificar OTP</button>
             <div id="resultado" class="result-box" style="display:none;"></div>
+            <p class="intentos">Bloqueo anti-fuerza-bruta: {{ max_intentos }} intentos fallidos → {{ bloqueo_segundos }}s de espera.</p>
         </div>
     </div>
 
     <!-- Desglose Matemático Interno -->
     <div class="card" style="margin-top: 20px;">
         <h3>3. Cálculo Interno RFC 6238 (En tiempo real)</h3>
-        
+
         <div class="flex" style="justify-content: space-between; align-items: center;">
             <div>Tiempo restante ventana: <span id="timeRemainingSec" style="font-weight: bold; color: #00ffcc;">--</span>s</div>
             <div class="code-box">OTP Calculado: <span id="currentOtp">------</span></div>
         </div>
-        
+
         <div class="timer-bar">
             <div id="timerBar" class="timer-progress"></div>
         </div>
@@ -78,6 +86,7 @@
             <tr><td>Binario Truncado (31 bits):</td><td id="binaryCode">--</td></tr>
             <tr><td>Verificación PyOTP (`.now()`):</td><td id="pyotpCheck" style="color: #00ffcc;">--</td></tr>
         </table>
+        <p class="hint">Este panel muestra el código válido en tiempo real con fines didácticos. En un sistema real nunca se expondría: aquí el bloqueo de intentos de la tarjeta 2 se entrena como concepto, no como medida de seguridad de esta demo.</p>
     </div>
 </div>
 
@@ -85,6 +94,7 @@
     async function actualizarEstado() {
         try {
             const res = await fetch('/api/estado');
+            if (!res.ok) throw new Error('HTTP ' + res.status);
             const data = await res.json();
 
             document.getElementById('unixTime').innerText = data.unix_time;
@@ -96,17 +106,12 @@
             document.getElementById('currentOtp').innerText = data.otp;
             document.getElementById('pyotpCheck').innerText = data.pyotp_check;
 
-            // Actualizar barra de progreso
             const porcentaje = (data.time_remaining / 30) * 100;
             const timerBar = document.getElementById('timerBar');
             timerBar.style.width = porcentaje + '%';
-            
-            if (porcentaje < 20) {
-                timerBar.style.background = '#ff4444';
-            } else {
-                timerBar.style.background = '#00cc66';
-            }
-        } catch(e) { console.error(e); }
+
+            timerBar.style.background = (porcentaje < 20) ? '#ff4444' : '#00cc66';
+        } catch (e) { console.error('No se pudo actualizar el estado:', e); }
     }
 
     async function verificarToken() {
@@ -121,21 +126,43 @@
             return;
         }
 
-        const res = await fetch('/api/verificar', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: token, window: windowVal })
-        });
+        try {
+            const res = await fetch('/api/verificar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: token, window: windowVal })
+            });
+            const data = await res.json();
+            resBox.style.display = "block";
 
-        const data = await res.json();
-        resBox.style.display = "block";
-
-        if (data.valido) {
-            resBox.className = "result-box success";
-            resBox.innerText = "✓ ¡AUTENTICACIÓN CORRECTA! Token válido.";
-        } else {
+            if (res.status === 429 || data.bloqueado) {
+                resBox.className = "result-box warning";
+                resBox.innerText = `⏳ Bloqueado por demasiados intentos fallidos. Espera ${data.segundos_restantes}s.`;
+            } else if (data.valido) {
+                resBox.className = "result-box success";
+                resBox.innerText = "✓ ¡AUTENTICACIÓN CORRECTA! Token válido.";
+            } else {
+                resBox.className = "result-box error";
+                resBox.innerText = `✗ TOKEN INVÁLIDO o CADUCADO. (Esperado: ${data.token_actual} | Intentos restantes: ${data.intentos_restantes})`;
+            }
+        } catch (e) {
             resBox.className = "result-box error";
-            resBox.innerText = `✗ TOKEN INVÁLIDO o CADUCADO. (Esperado: ${data.token_actual})`;
+            resBox.innerText = "No se pudo contactar con el servidor. Revisa la consola.";
+            resBox.style.display = "block";
+            console.error(e);
+        }
+    }
+
+    async function reiniciarPractica() {
+        try {
+            const res = await fetch('/api/reiniciar', { method: 'POST' });
+            const data = await res.json();
+            document.getElementById('qrImg').src = 'data:image/png;base64,' + data.qr_b64;
+            document.getElementById('secretBox').innerText = data.secret;
+            document.getElementById('resultado').style.display = 'none';
+            document.getElementById('tokenInput').value = '';
+        } catch (e) {
+            console.error('No se pudo reiniciar la práctica:', e);
         }
     }
 

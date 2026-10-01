@@ -7,11 +7,18 @@
         body { font-family: Arial, sans-serif; text-align: center; background: #121212; color: white; padding: 20px; }
         #video-container { position: relative; display: inline-block; }
         video { border: 3px solid #333; border-radius: 8px; width: 480px; height: 360px; }
-        .controls { margin: 15px; }
-        button { padding: 10px 20px; font-size: 16px; margin: 5px; cursor: pointer; border-radius: 5px; border: none; }
+        .controls { margin: 15px; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; }
+        .panel { max-width: 480px; margin: 10px auto; text-align: left; background: #1c1c1c; border-radius: 8px; padding: 15px; }
+        label { font-size: 14px; color: #ccc; display: block; margin-bottom: 4px; }
+        input[type="text"], select { width: 100%; padding: 8px; font-size: 15px; border-radius: 5px; border: 1px solid #444; background: #222; color: white; box-sizing: border-box; margin-bottom: 10px; }
+        button { padding: 10px 16px; font-size: 15px; margin: 4px; cursor: pointer; border-radius: 5px; border: none; }
         .btn-blue { background: #007bff; color: white; }
         .btn-green { background: #28a745; color: white; }
+        .btn-red { background: #dc3545; color: white; }
+        .btn-grey { background: #555; color: white; }
         #status-box { font-size: 18px; margin-top: 15px; font-weight: bold; }
+        #usuarios-box { font-size: 13px; color: #999; margin-top: 8px; }
+        .config-box { font-size: 12px; color: #777; margin-top: 20px; }
     </style>
 </head>
 <body>
@@ -21,16 +28,37 @@
         <video id="webcam" autoplay playsinline></video>
     </div>
 
-    <div class="controls">
-        <button class="btn-blue" onclick="registrarRostro()">1. Registrar Rostro</button>
-        <button class="btn-green" onclick="toggleVerificacion()">2. Iniciar / Detener Verificación</button>
+    <div class="panel">
+        <label for="nombreInput">Nombre de usuario para registrar</label>
+        <input type="text" id="nombreInput" placeholder="ej: ana, luis-perez...">
+        <div class="controls">
+            <button class="btn-blue" onclick="registrarRostro()">1. Registrar Rostro</button>
+        </div>
+
+        <label for="usuarioSelect">Verificar contra</label>
+        <select id="usuarioSelect">
+            <option value="">-- Identificación 1:N (comparar con todos) --</option>
+        </select>
+        <div class="controls">
+            <button class="btn-green" onclick="toggleVerificacion()">2. Iniciar / Detener Verificación</button>
+            <button class="btn-grey" onclick="actualizarUsuarios()">Actualizar lista</button>
+            <button class="btn-red" onclick="eliminarUsuarioSeleccionado()">Eliminar seleccionado</button>
+        </div>
+        <div id="usuarios-box">Usuarios registrados: cargando...</div>
     </div>
 
     <div id="status-box">Cargando cámara...</div>
+    <div class="config-box">
+        Configuración activa — EAR &lt; {{ ear_umbral }} (ojo cerrado) · distancia ≤ {{ umbral_distancia }} (mismo rostro) · parpadeos requeridos: {{ parpadeos_requeridos }}
+    </div>
 
     <script>
         const video = document.getElementById('webcam');
         const statusBox = document.getElementById('status-box');
+        const usuariosBox = document.getElementById('usuarios-box');
+        const usuarioSelect = document.getElementById('usuarioSelect');
+        const PARPADEOS_REQUERIDOS = {{ parpadeos_requeridos }};
+
         let verificando = false;
         let parpadeos = 0;
         let ojoEstabaCerrado = false;
@@ -47,21 +75,72 @@
             return canvas.toDataURL('image/jpeg');
         }
 
+        async function actualizarUsuarios() {
+            try {
+                const res = await fetch('/api/usuarios');
+                const data = await res.json();
+                const seleccionActual = usuarioSelect.value;
+                usuarioSelect.innerHTML = '<option value="">-- Identificación 1:N (comparar con todos) --</option>';
+                data.usuarios.forEach(u => {
+                    const opt = document.createElement('option');
+                    opt.value = u;
+                    opt.textContent = u;
+                    usuarioSelect.appendChild(opt);
+                });
+                usuarioSelect.value = data.usuarios.includes(seleccionActual) ? seleccionActual : "";
+                usuariosBox.innerText = data.usuarios.length
+                    ? `Usuarios registrados: ${data.usuarios.join(', ')}`
+                    : "Usuarios registrados: ninguno todavía.";
+            } catch (e) {
+                usuariosBox.innerText = "No se pudo obtener la lista de usuarios.";
+                console.error(e);
+            }
+        }
+
+        async function eliminarUsuarioSeleccionado() {
+            const nombre = usuarioSelect.value;
+            if (!nombre) {
+                statusBox.innerText = "Selecciona primero un usuario concreto para eliminarlo.";
+                return;
+            }
+            try {
+                const res = await fetch(`/api/usuarios/${encodeURIComponent(nombre)}`, { method: 'DELETE' });
+                const data = await res.json();
+                statusBox.innerText = data.message;
+                actualizarUsuarios();
+            } catch (e) {
+                statusBox.innerText = "No se pudo eliminar el usuario.";
+                console.error(e);
+            }
+        }
+
         async function registrarRostro() {
+            const nombre = document.getElementById('nombreInput').value.trim();
+            if (!nombre) {
+                statusBox.innerText = "Escribe un nombre de usuario antes de registrar.";
+                return;
+            }
             statusBox.innerText = "Procesando registro...";
             const img = capturarFrame();
-            const res = await fetch('/api/registrar', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ image: img })
-            });
-            const data = await res.json();
-            statusBox.innerText = data.message;
+            try {
+                const res = await fetch('/api/registrar', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image: img, nombre: nombre })
+                });
+                const data = await res.json();
+                statusBox.innerText = data.message;
+                actualizarUsuarios();
+            } catch (e) {
+                statusBox.innerText = "Error de red al registrar. Revisa la consola.";
+                console.error(e);
+            }
         }
 
         function toggleVerificacion() {
             verificando = !verificando;
             parpadeos = 0;
+            ojoEstabaCerrado = false;
             if (verificando) bucleVerificacion();
             else statusBox.innerText = "Verificación detenida.";
         }
@@ -70,11 +149,12 @@
             if (!verificando) return;
 
             const img = capturarFrame();
+            const nombre = usuarioSelect.value;
             try {
                 const res = await fetch('/api/verificar', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ image: img })
+                    body: JSON.stringify({ image: img, nombre: nombre })
                 });
                 const data = await res.json();
 
@@ -87,12 +167,12 @@
                             ojoEstabaCerrado = false;
                         }
 
-                        if (parpadeos >= 2) {
-                            statusBox.innerHTML = `<span style="color: #28a745;">¡ACCESO CONCEDIDO! (Dist: ${data.distancia} | Parpadeos: ${parpadeos}/2)</span>`;
+                        if (parpadeos >= PARPADEOS_REQUERIDOS) {
+                            statusBox.innerHTML = `<span style="color: #28a745;">¡ACCESO CONCEDIDO! Usuario: ${data.usuario} (Dist: ${data.distancia} | Parpadeos: ${parpadeos}/${PARPADEOS_REQUERIDOS})</span>`;
                             verificando = false;
                             return;
                         } else {
-                            statusBox.innerHTML = `<span style="color: #ffc107;">Rostro OK (Dist: ${data.distancia}) | Parpadea (${parpadeos}/2)</span>`;
+                            statusBox.innerHTML = `<span style="color: #ffc107;">Rostro OK: ${data.usuario} (Dist: ${data.distancia}) | Parpadea (${parpadeos}/${PARPADEOS_REQUERIDOS})</span>`;
                         }
                     } else {
                         statusBox.innerHTML = `<span style="color: #dc3545;">Rostro no reconocido (Dist: ${data.distancia})</span>`;
@@ -100,10 +180,15 @@
                 } else {
                     statusBox.innerText = data.message;
                 }
-            } catch (e) { console.error(e); }
+            } catch (e) {
+                statusBox.innerText = "Error de red al verificar. Revisa la consola.";
+                console.error(e);
+            }
 
             if (verificando) setTimeout(bucleVerificacion, 200); // 5 FPS para no saturar CPU
         }
+
+        actualizarUsuarios();
     </script>
 </body>
 </html>

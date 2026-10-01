@@ -10,7 +10,7 @@ services:
       # sesión sobreviva a un `docker compose restart`, fija una propia con:
       # python -c "import secrets; print(secrets.token_hex(32))"
       - FLASK_SECRET_KEY=${FLASK_SECRET_KEY:-}
-      # Parámetros del laboratorio (ajustables para experimentar en clase)
+      # Parámetros del laboratorio (ajustables para experimentar con distintos valores)
       - TOTP_MAX_VENTANA=2
       - TOTP_MAX_INTENTOS=5
       - TOTP_BLOQUEO_SEGUNDOS=30

@@ -8,7 +8,7 @@ services:
       # Mantiene las plantillas biométricas registradas aunque el contenedor se reinicie
       - ./data:/app/data
     environment:
-      # Umbrales del laboratorio, ajustables para experimentar en clase
+      # Umbrales del laboratorio, ajustables para experimentar con distintos valores
       - EAR_UMBRAL=0.21
       - UMBRAL_DISTANCIA=0.50
       - PARPADEOS_REQUERIDOS=2

@@ -30,7 +30,7 @@ def obtener_secreto():
     """Devuelve la semilla TOTP de la sesión actual, generándola si es la primera visita.
 
     Cada pestaña/navegador recibe su propia semilla en una cookie de sesión firmada
-    (no hay almacenamiento en el servidor). Esto evita que dos alumnos que acceden
+    (no hay almacenamiento en el servidor). Esto evita que dos personas que acceden
     al mismo servidor compartan, sin saberlo, una única identidad MFA global.
     """
     if "totp_secret" not in session:
@@ -89,7 +89,7 @@ def generar_qr_base64(uri):
 def index():
     secret = obtener_secreto()
     totp = pyotp.TOTP(secret)
-    uri = totp.provisioning_uri(name="alumno@laboratorio.local", issuer_name="Ciberseguridad-TOTP")
+    uri = totp.provisioning_uri(name="usuario@laboratorio.local", issuer_name="Ciberseguridad-TOTP")
     qr_b64 = generar_qr_base64(uri)
     return render_template(
         "index.html",
@@ -113,7 +113,7 @@ def reiniciar():
     """Genera una nueva semilla para la sesión actual.
 
     Permite reiniciar la práctica (nuevo secreto, nuevo QR) sin tener que
-    reiniciar el contenedor ni perder la sesión del resto de alumnos.
+    reiniciar el contenedor ni afectar a las sesiones de otros usuarios.
     """
     session["totp_secret"] = pyotp.random_base32()
     session.pop("intentos_fallidos", None)
@@ -121,7 +121,7 @@ def reiniciar():
 
     secret = session["totp_secret"]
     totp = pyotp.TOTP(secret)
-    uri = totp.provisioning_uri(name="alumno@laboratorio.local", issuer_name="Ciberseguridad-TOTP")
+    uri = totp.provisioning_uri(name="usuario@laboratorio.local", issuer_name="Ciberseguridad-TOTP")
     return jsonify({"secret": secret, "uri": uri, "qr_b64": generar_qr_base64(uri)})
 
 

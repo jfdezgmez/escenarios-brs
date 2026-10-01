@@ -76,9 +76,9 @@ HTML5 / JS         <---(JSON: Distancia, EAR, Estado)----------  Flask / OpenCV 
 - **Gestión multiusuario**: cada usuario registrado se guarda como `data/usuarios/<nombre>.npy`. El nombre se sanea (solo ASCII alfanumérico, `-` y `_`) antes de tocar el sistema de archivos, para evitar cualquier intento de *path traversal*.
 - **Endpoint `POST /api/registrar`**: recibe una foto y un `nombre`, valida que exista únicamente un rostro, genera su embedding de 128 dimensiones con `face_recognition` y lo guarda.
 - **Endpoint `POST /api/verificar`**: si se indica un `nombre`, compara en modo 1:1 contra ese usuario; si no, compara en modo 1:N contra todos los usuarios registrados y devuelve el más parecido. Calcula también el EAR medio de ambos ojos para la prueba de vida.
-- **Endpoint `GET /api/usuarios`** y **`DELETE /api/usuarios/<nombre>`**: listar y eliminar usuarios registrados, útil para reiniciar la práctica entre alumnos.
+- **Endpoint `GET /api/usuarios`** y **`DELETE /api/usuarios/<nombre>`**: listar y eliminar usuarios registrados, útil para reiniciar la práctica cuando haga falta.
 - **Endpoint `GET /health`**: usado por el `HEALTHCHECK` de Docker.
-- **Umbrales configurables**: `EAR_UMBRAL`, `UMBRAL_DISTANCIA` y `PARPADEOS_REQUERIDOS` se leen de variables de entorno (ver [3.3](#33-variables-de-entorno)) en vez de estar fijos en el código, y se muestran también en la propia interfaz web para que el alumno sepa en todo momento contra qué valores se está comparando.
+- **Umbrales configurables**: `EAR_UMBRAL`, `UMBRAL_DISTANCIA` y `PARPADEOS_REQUERIDOS` se leen de variables de entorno (ver [3.3](#33-variables-de-entorno)) en vez de estar fijos en el código, y se muestran también en la propia interfaz web para que sepas en todo momento contra qué valores se está comparando.
 
 ### 2.3. Frontend Web (`templates/index.html`)
 - **Captura de cámara:** usa `navigator.mediaDevices.getUserMedia` para acceder a la cámara del host sin requerir GUI dentro del contenedor.
@@ -108,11 +108,11 @@ biometria-docker/
     └── index.html
 ```
 
-> **Importante:** este repositorio **no** incluye ninguna plantilla biométrica de ejemplo. Cada despliegue empieza sin usuarios registrados; cada alumno registra su propio rostro al hacer la práctica. Las plantillas que se generen se guardan solo en tu `./data/usuarios` local (excluido de git) y nunca deben compartirse ni subirse a un repositorio público.
+> **Importante:** este repositorio **no** incluye ninguna plantilla biométrica de ejemplo. Cada despliegue empieza sin usuarios registrados; cada usuario registra su propio rostro al hacer la práctica. Las plantillas que se generen se guardan solo en tu `./data/usuarios` local (excluido de git) y nunca deben compartirse ni subirse a un repositorio público.
 
 ### 3.3. Variables de Entorno
 
-Todas son opcionales; `docker-compose.yml` ya trae valores por defecto razonables para el aula:
+Todas son opcionales; `docker-compose.yml` ya trae valores por defecto razonables para empezar:
 
 | Variable | Por defecto | Descripción |
 |---|---|---|
@@ -160,5 +160,5 @@ Abre el navegador en [http://localhost:5000](http://localhost:5000) y concede pe
 ## 5. Limitaciones conocidas y posibles ampliaciones
 
 - El liveness por parpadeo es básico: no resiste un ataque con **vídeo** (en lugar de foto fija) de la persona parpadeando. Una ampliación natural sería añadir un reto aleatorio (p. ej. "gira la cabeza a la izquierda") para dificultar la reproducción de un vídeo pregrabado.
-- No hay autenticación de quién puede registrar o borrar usuarios: en un despliegue real de aula esto es aceptable (todos los alumnos comparten el mismo contenedor bajo supervisión), pero no sería válido en producción sin control de acceso administrativo.
-- El almacenamiento es un fichero `.npy` por usuario en disco; para una base de usuarios grande convendría una base de datos vectorial, pero para un laboratorio con un grupo de clase es más que suficiente y mucho más fácil de inspeccionar.
+- No hay autenticación de quién puede registrar o borrar usuarios: en un despliegue donde varias personas comparten el mismo contenedor bajo supervisión esto puede ser aceptable, pero no sería válido en producción sin control de acceso administrativo.
+- El almacenamiento es un fichero `.npy` por usuario en disco; para una base de usuarios grande convendría una base de datos vectorial, pero para un laboratorio con un número reducido de usuarios es más que suficiente y mucho más fácil de inspeccionar.

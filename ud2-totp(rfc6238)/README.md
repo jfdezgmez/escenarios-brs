@@ -55,7 +55,7 @@ Durante la fase de configuración inicial (enrolamiento):
 1. El servidor genera una clave secreta aleatoria $K$ en codificación **Base32** (p. ej. `JBSWY3DPEHPK3PXP`).
 2. Se genera un URI normalizado bajo el esquema `otpauth://`:
    ```text
-   otpauth://totp/CursoCiberseguridad:alumno@laboratorio.local?secret=JBSWY3DPEHPK3PXP&issuer=CursoCiberseguridad
+   otpauth://totp/CursoCiberseguridad:usuario@laboratorio.local?secret=JBSWY3DPEHPK3PXP&issuer=CursoCiberseguridad
    ```
 3. El URI se codifica en un código QR que el usuario escanea con su aplicación móvil. A partir de este instante, tanto el cliente como el servidor almacenan la misma clave secreta $K$.
 
@@ -134,7 +134,7 @@ Define las librerías necesarias:
 - **`pyotp`:** Librería estándar de Python para generación y validación de tokens OTP.
 - **`qrcode[pil]` y `Pillow`:** Generación de códigos QR tanto en formato gráfico PNG como en la consola de comandos.
 
-No se han añadido dependencias nuevas: las funcionalidades descritas abajo (sesión por alumno, bloqueo anti-fuerza-bruta) se implementan con la librería estándar de Python y las sesiones de Flask (cookies firmadas), sin necesidad de una base de datos ni de paquetes adicionales.
+No se han añadido dependencias nuevas: las funcionalidades descritas abajo (sesión por usuario, bloqueo anti-fuerza-bruta) se implementan con la librería estándar de Python y las sesiones de Flask (cookies firmadas), sin necesidad de una base de datos ni de paquetes adicionales.
 
 #### B. `Dockerfile` y `docker-compose.yml`
 - **`Dockerfile`:** Imagen `python:3.10-slim`, instala las dependencias de `requirements.txt` sin caché, **ejecuta la aplicación con un usuario sin privilegios** (`appuser`, no root) y expone un `HEALTHCHECK` contra `/health` para que Docker pueda detectar si el servicio deja de responder.
@@ -145,7 +145,7 @@ Diseñado para la ejecución en línea de comandos según los requisitos de la p
 - `pyotp.random_base32()`: Genera la semilla en Base32 aleatoria al arrancar.
 - `pyotp.totp.TOTP(secret).provisioning_uri(...)`: Genera la URI bajo la especificación normalizada `otpauth://`.
 - `qr.print_ascii(invert=True)`: Renderiza el código QR mediante caracteres unicode/ASCII en la terminal sin necesidad de interfaz gráfica.
-- **Bucle de validación:** Lee tokens ingresados por el alumno y ejecuta `totp.verify(token, valid_window=1)`. Si el código es válido, responde con un mensaje de éxito; si no lo es, muestra el token esperado en ese instante para auditoría. Sale limpiamente con `Ctrl+C` o fin de entrada, en lugar de mostrar una traza de error.
+- **Bucle de validación:** Lee tokens ingresados por el usuario y ejecuta `totp.verify(token, valid_window=1)`. Si el código es válido, responde con un mensaje de éxito; si no lo es, muestra el token esperado en ese instante para auditoría. Sale limpiamente con `Ctrl+C` o fin de entrada, en lugar de mostrar una traza de error.
 
 #### D. Backend Servidor Web (`app.py`)
 Proporciona endpoints REST y expone la matemática interna del RFC:
@@ -179,7 +179,7 @@ docker compose up --build
 
 ### 3.2. Variables de Entorno
 
-Todas son opcionales; `docker-compose.yml` ya trae valores por defecto razonables para el aula:
+Todas son opcionales; `docker-compose.yml` ya trae valores por defecto razonables para empezar:
 
 | Variable | Por defecto | Descripción |
 |---|---|---|
@@ -194,7 +194,7 @@ Todas son opcionales; `docker-compose.yml` ya trae valores por defecto razonable
 2. **Enrolamiento:**
    - Abre tu aplicación móvil MFA (por ejemplo, **Aegis** o **Google Authenticator**).
    - Pulsa en *Agregar cuenta* y escanea el código QR que aparece en pantalla.
-   - Esa semilla es exclusiva de tu sesión de navegador: si un compañero abre la misma URL desde otro dispositivo, generará su propia semilla y no verá la tuya.
+   - Esa semilla es exclusiva de tu sesión de navegador: si otra persona abre la misma URL desde otro dispositivo, generará su propia semilla y no verá la tuya.
 3. **Monitoreo en tiempo real:**
    - Observa la sección **"3. Cálculo Interno del Algoritmo"**.
    - Verás cómo el tiempo Unix avanza segundo a segundo y cómo el contador $C$ permanece constante durante 30 segundos.
@@ -202,7 +202,7 @@ Todas son opcionales; `docker-compose.yml` ya trae valores por defecto razonable
 4. **Verificación de Token:**
    - Introduce el código de 6 dígitos generado en tu móvil en la tarjeta de validación.
    - Selecciona el grado de tolerancia de ventana ($0$, $1$ o $2$) y haz clic en **"Verificar OTP"**.
-5. **Reiniciar la práctica:** si quieres volver a enrolar desde cero (por ejemplo, para repetir la demo con otro alumno en el mismo puesto), pulsa **"Reiniciar práctica"**: se genera una semilla nueva y se limpia cualquier bloqueo activo, sin reiniciar el contenedor.
+5. **Reiniciar la práctica:** si quieres volver a enrolar desde cero para repetir la demo en el mismo puesto, pulsa **"Reiniciar práctica"**: se genera una semilla nueva y se limpia cualquier bloqueo activo, sin reiniciar el contenedor.
 
 ---
 
@@ -222,16 +222,16 @@ Todas son opcionales; `docker-compose.yml` ya trae valores por defecto razonable
   - Introduce 5 códigos incorrectos seguidos y observa cómo la tarjeta de validación pasa a modo "bloqueado" durante `TOTP_BLOQUEO_SEGUNDOS`.
   > **Reflexión:** un código de 6 dígitos solo tiene 1.000.000 de combinaciones. Sin un mecanismo de bloqueo, ¿cuánto tardaría un script en probarlas todas contra un servidor sin esta protección?
 
-- **Aislamiento entre alumnos:**
+- **Aislamiento de sesiones:**
   - Abre la misma URL en dos navegadores (o uno en modo incógnito) y comprueba en la tarjeta 1 que cada uno obtiene un secreto y un QR distintos.
-  > Antes de esta corrección, **todas las visitas compartían una única semilla global**: cualquier alumno podía generar códigos válidos para la "identidad" de cualquier otro conectado al mismo servidor. Esta es la razón por la que ahora la semilla vive en la sesión de cada navegador.
+  > Antes de esta corrección, **todas las visitas compartían una única semilla global**: cualquier usuario podía generar códigos válidos para la "identidad" de cualquier otro conectado al mismo servidor. Esta es la razón por la que ahora la semilla vive en la sesión de cada navegador.
 
 ---
 
 ## 5. Limitaciones conocidas
 
-Este laboratorio es intencionadamente transparente: la tarjeta 3 expone en tiempo real el código válido, el HMAC y el resto de valores internos, para que el alumno pueda seguir el algoritmo paso a paso. Por ese motivo:
+Este laboratorio es intencionadamente transparente: la tarjeta 3 expone en tiempo real el código válido, el HMAC y el resto de valores internos, para que puedas seguir el algoritmo paso a paso. Por ese motivo:
 
 - El bloqueo anti-fuerza-bruta de la sección 4 es un **recurso pedagógico** para introducir el concepto de *rate limiting*, no una medida de seguridad real de esta demo (quien tiene el panel delante ya ve el código válido sin necesidad de forzarlo).
 - La sesión se guarda en una cookie firmada por el propio servidor Flask, sin base de datos: si borras las cookies del navegador o cambias de dispositivo, se te asignará una semilla nueva.
-- Pensado para uso en un aula/laboratorio controlado, no para producción.
+- Pensado para un entorno de laboratorio controlado, no para producción.

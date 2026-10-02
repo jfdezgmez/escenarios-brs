@@ -33,17 +33,23 @@ COPY --from=builder /install /usr/local
 
 WORKDIR /app
 COPY . .
+RUN chmod +x entrypoint.sh
 
-# Directorio donde se guardarán las plantillas biométricas (una por usuario)
+# Directorio donde se guardarán las plantillas biométricas (una por usuario).
+# Sirve de valor por defecto cuando se ejecuta sin volumen montado; cuando sí
+# hay volumen (docker-compose.yml), entrypoint.sh corrige los permisos reales
+# en cada arranque (ver comentario en ese fichero).
 RUN mkdir -p /app/data/usuarios && chown -R appuser:appuser /app
 
-# Ejecutar como usuario sin privilegios (bastionado: si la app se ve
-# comprometida, el atacante no obtiene una shell root dentro del contenedor).
-USER appuser
-
+# La imagen se mantiene como root por defecto a propósito: entrypoint.sh
+# necesita ese privilegio para corregir los permisos del volumen montado
+# antes de arrancar la aplicación. El proceso de Flask en sí (el que procesa
+# las peticiones) se ejecuta sin privilegios, como "appuser" — ver
+# entrypoint.sh, que hace el cambio de usuario real.
 EXPOSE 5000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=3)" || exit 1
 
+ENTRYPOINT ["./entrypoint.sh"]
 CMD ["python", "app.py"]
